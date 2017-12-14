@@ -5,14 +5,16 @@
 %          10/07/16 - Works as intended
 %          10/09/16 - Made some functions to make code easier to read
 %          10/09/16 - Added M and P plots, and shock nozzle plot
+%          12/14/17 - Switched all A_M_RELATION function calls to the new
+%                     ISENTROPIC_FLOW function to increase speed (a lot)
 
-function varargout = GUI_CD_Nozzle(varargin)
+function varargout = GUI_CD_Nozzle_v2(varargin)
 
 gui_Singleton = 1;
 gui_State = struct('gui_Name',       mfilename, ...
                    'gui_Singleton',  gui_Singleton, ...
-                   'gui_OpeningFcn', @GUI_CD_Nozzle_OpeningFcn, ...
-                   'gui_OutputFcn',  @GUI_CD_Nozzle_OutputFcn, ...
+                   'gui_OpeningFcn', @GUI_CD_Nozzle_v2_OpeningFcn, ...
+                   'gui_OutputFcn',  @GUI_CD_Nozzle_v2_OutputFcn, ...
                    'gui_LayoutFcn',  [] , ...
                    'gui_Callback',   []);
 if nargin && ischar(varargin{1})
@@ -25,13 +27,13 @@ else
     gui_mainfcn(gui_State, varargin{:});
 end
 
-% --- Executes just before GUI_CD_Nozzle is made visible.
-function GUI_CD_Nozzle_OpeningFcn(hObject, eventdata, handles, varargin)
+% --- Executes just before GUI_CD_Nozzle_v2 is made visible.
+function GUI_CD_Nozzle_v2_OpeningFcn(hObject, eventdata, handles, varargin)
 handles.output = hObject;
 guidata(hObject, handles);
 
 % --- Outputs from this function are returned to the command line.
-function varargout = GUI_CD_Nozzle_OutputFcn(hObject, eventdata, handles) 
+function varargout = GUI_CD_Nozzle_v2_OutputFcn(hObject, eventdata, handles) 
 varargout{1} = handles.output;
 
 % ON STARTUP
@@ -226,16 +228,16 @@ gogm1 = g/gm1;
 gogp1 = g/gp1;
 
 % Solve for subsonic and supersonic Mach numbers
-Msub = A_M_RELATION(Ae_At,0,g,'Sub');                                       % Subsonic Mach number
-Msup = A_M_RELATION(Ae_At,0,g,'Sup');                                       % Supersonic Mach number
+Msub = ISENTROPIC_FLOW(Ae_At,'Asub',g,'M');                                 % Subsonic Mach number
+Msup = ISENTROPIC_FLOW(Ae_At,'Asup',g,'M');                                 % Supersonic Mach number
 
 % Pressure ratios for sub and sup
 Pe_Po_Sub = (1 + gm1o2*Msub^2)^(-gogm1);                                    % Subsonic pressure ratio
 Pe_Po_Sup = (1 + gm1o2*Msup^2)^(-gogm1);                                    % Supersonic pressure ratio
-
-% Pressure ratios for normal shock at exit
-Pe_P2    = 1 + ((2*gogp1)*(Msup^2-1));                                      % NS pressure ratio
-Pe_Po_NS = (Pe_P2)*(Pe_Po_Sup);                                             % Back-to-reservoir pressure ratio
+ 
+% Pressure ratios for normal shock at exit (NSE)
+P2_P1    = 1 + ((2*gogp1)*(Msup^2-1));                                      % NS pressure ratio
+Pe_Po_NS = (P2_P1)*(Pe_Po_Sup);                                             % Back-to-reservoir pressure ratio
 
 % Solve normal shock location if (Pe_Po < Pe_Po_sub && Pe_Po > Pe_Po_NS)
 % - Use direct method (as opposed to iterative method)
@@ -270,9 +272,9 @@ if (Pe_Po < Pe_Po_Sub && Pe_Po > Pe_Po_NS)
     M2  = sqrt(num/den);
     
     % Solve for the area ratios where the normal shock is located
-    A1_Astar     = A_M_RELATION(0,M1,g,'');                                 % Area ratio at shock (pre-shock)
-    A2_Astarstar = A_M_RELATION(0,M2,g,'');                                 % Area ratio at shock (post-shock)
-    Ae_Astarstar = A_M_RELATION(0,Me,g,'');                                 % Area ratio at exit
+    A1_Astar     = ISENTROPIC_FLOW(M1,'M',g,'AAs');                         % Area ratio at shock (pre-shock)
+    A2_Astarstar = ISENTROPIC_FLOW(M2,'M',g,'AAs');                         % Area ratio at shock (post-shock)
+    Ae_Astarstar = ISENTROPIC_FLOW(Me,'M',g,'AAs');                         % Area ratio at exit
     
     % Need this area ratio in plotting the normal shock
     assignin('base','A1_Astar',A1_Astar);
@@ -290,11 +292,11 @@ set(handles.textPePoNSSolution,'String',num2str(Pe_Po_NS));
 set(handles.textA_AstarSolution,'String','-');
 
 % Print choked and state conditions to GUI
-if (Pe_Po >= Pe_Po_Sub)
+if (Pe_Po > Pe_Po_Sub)
     CDState = 'ISEN_SUB';
     set(handles.textChokedSolution,'String','NO');
     set(handles.textStateSolution,'String','Isentropic Subsonic');
-elseif (Pe_Po < Pe_Po_Sub && Pe_Po > Pe_Po_NS);
+elseif (Pe_Po <= Pe_Po_Sub && Pe_Po > Pe_Po_NS);
     CDState = 'NS_NOZZLE';
     set(handles.textChokedSolution,'String','YES');
     set(handles.textStateSolution,'String','Normal Shock in Nozzle');
@@ -401,9 +403,9 @@ scFc  = 0.25*(b)/abs(minX);                                                 % Sc
 XPLOT = [(XRES).*scFc; XNOZ];                                               % Combine RES and NOZ for total X array
 APLOT = [ARES; ANOZ];                                                       % Combine Res and NOZ for total area ratio array
 
-% ==============================================
-% ============= PLOTTING NOZZLE ================
-% ==============================================
+% =========================================================================
+% ========================== PLOTTING NOZZLE ==============================
+% =========================================================================
 axes(handles.plotData);                                                     % Select appropriate axes
 cla; hold on; grid on;                                                      % Get ready for plotting
 xNoz = [0 1];                                                               % Nozzle X points
@@ -415,16 +417,16 @@ xR  = ang.*(0.25*(b)/abs(minX));                                            % Re
 plot(xR,yR,'k-',xR,-yR,'k-','LineWidth',3);                                 % Plot reservoir
 plot([xNoz(end) xNoz(end)],[yNoz(end) -yNoz(end)],'k-','LineWidth',2);      % Plot line at nozzle exit
 plot([0 0],[-b b],'k-','LineWidth',2);                                      % Plot line at nozzle throat
-if (strcmpi(CDState,'NS_NOZZLE'))                                           % Normal shock in nozzle
-    NSLoc = (A1_Astar-1)/(Ae_At-1);
+if (strcmpi(CDState,'NS_NOZZLE'))                                           % NORMAL SHOCK IN NOZZLE
+    NSLoc = (A1_Astar-1)/(Ae_At-1);                                         % Normal shock location
     xNS   = [NSLoc NSLoc];                                                  % Construct X line
     yNS   = [0 (((Ae_At/2)-b)*NSLoc)+b];                                    % Construct Y line
     plot(xNS,yNS, 'r-',xNS,-yNS,'r-','LineWidth',3);                        % Plot shock
-elseif (strcmpi(CDState,'OE'));                                             % Overexpanded (Oblique)
+elseif (strcmpi(CDState,'OE'));                                             % OVEREXPANDED (OBLIQUE)
     xOS = [xNoz(end) xNoz(end)+0.25*xNoz(end)];                             % Construct X line
     yOS = [yNoz(end) 0.75*yNoz(end)];                                       % Construct Y line
     plot(xOS,yOS,'m-',xOS,-yOS,'m-','LineWidth',3);                         % Plot shock
-elseif (strcmpi(CDState,'UE'))                                              % Underexpanded (P-M)
+elseif (strcmpi(CDState,'UE'))                                              % UNDEREXPANDED (P-M)
     xPM  = [xNoz(end) xNoz(end)+0.25*xNoz(end)];                            % Construct X line
     yPM1 = [yNoz(end) 0.65*yNoz(end)];                                      % Construct Y line 1
     yPM2 = [yNoz(end) 0.75*yNoz(end)];                                      % Construct Y line 2
@@ -433,16 +435,16 @@ elseif (strcmpi(CDState,'UE'))                                              % Un
     plot(xPM,yPM2,'c-',xPM,-yPM2,'c-','LineWidth',3);                       % Plot PM wave 2
     plot(xPM,yPM3,'c-',xPM,-yPM3,'c-','LineWidth',3);                       % Plot PM wave 3
 end
-xlim([xR(1) max(xNoz)+0.25*max(xNoz)]);
+xlim([xR(1) max(xNoz)+0.25*max(xNoz)]);                                     % Set X-axis limits
 ylim([-yNoz(end)-0.1*yNoz(end) yNoz(end)+0.1*yNoz(end)]);                   % Set Y-axis limits
-% ==================================================
-% ============= END PLOTTING NOZZLE ================
-% ==================================================
+% =========================================================================
+% ========================== END PLOTTING NOZZLE ==========================
+% =========================================================================
 
-% ===============================================
-% ============= PLOTTING P AND M ================
-% ===============================================
-% ---- CHOKED SUBSONIC AND SUPERSONIC ISENTROPIC SOLUTIONS ----
+% =========================================================================
+% ============================ PLOTTING P AND M ===========================
+% =========================================================================
+% ----------- CHOKED SUBSONIC AND SUPERSONIC ISENTROPIC SOLUTIONS ---------
 % - Always calculate to show dashed lines on plots
 
 % Initialize arrays
@@ -456,8 +458,8 @@ for i = 1:1:numMPPts
         MPLOTSub(i) = 1;                                                    % Set throat (choked) Mach number to unity
         MPLOTSup(i) = 1;                                                    % Set throat (choked) Mach number to unity
     else
-        MPLOTSub(i) = A_M_RELATION(ANOZ(i),0,g,'Sub');                      % Subsonic Mach numbers from area ratio
-        MPLOTSup(i) = A_M_RELATION(ANOZ(i),0,g,'Sup');                      % Supersonic Mach numbers from area ratio
+        MPLOTSub(i) = ISENTROPIC_FLOW(ANOZ(i),'Asub',g,'M');                % Subsonic Mach numbers from area ratio
+        MPLOTSup(i) = ISENTROPIC_FLOW(ANOZ(i),'Asup',g,'M');                % Supersonic Mach numbers from area ratio
     end
 end
 
@@ -467,46 +469,45 @@ PPLOTSup = ((1 + gm1o2.*MPLOTSup.^2).^(-gogm1))';                           % Su
 
 % Reservoir
 for i = 1:1:numResPts
-    MPLOTRes(i,1) = A_M_RELATION(APLOT(i),0,g,'Sub');
+    MPLOTRes(i,1) = ISENTROPIC_FLOW(APLOT(i),'Asub',g,'M');
 end
 PPLOTRes = ((1 + gm1o2.*MPLOTRes.^2).^(-gogm1))';
-% ------------------------------------------------------------
+% -------------------------------------------------------------------------
 
-% ------------------ SUBSONIC ISENTROPIC --------------
+% --------------------------- SUBSONIC ISENTROPIC -------------------------
 if (strcmpi(CDState,'ISEN_SUB'))
-    Me       = sqrt((2/gm1)*(Pe_Po^(-gm1og)-1));
-    Ae_Astar = A_M_RELATION(0,Me,g,'Sub');
-    At_Astar = (1/Ae_At)*(Ae_Astar);
-    Mt       = A_M_RELATION(At_Astar,0,g,'Sub');
+    Me       = sqrt((2/gm1)*(Pe_Po^(-gm1og)-1));                            % Exit Mach number based on exit pressure ratio []
+    Ae_Astar = ISENTROPIC_FLOW(Me,'M',g,'AAs');                             % Area ratio for choked flow based on exit Mach number []
+    At_Astar = (1/Ae_At)*(Ae_Astar);                                        % Throat to star area ratio []
+    Mt       = ISENTROPIC_FLOW(At_Astar,'Asub',g,'M');                      % Throat Mach number []
     Pt_Po    = (1 + gm1o2*Mt^2)^(-gogm1);
     
-    for i = 1:1:length(ARES)
+    for i = 1:1:length(ARES)                                                % For each point in the reservoir
         Aarbres_Astar(i,1) = ARES(i)*(1/Ae_At)*Ae_Astar;
-        Marbres(i,1)       = A_M_RELATION(Aarbres_Astar(i),0,g,'Sub');
+        Marbres(i,1)       = ISENTROPIC_FLOW(Aarbres_Astar(i),'Asub',g,'M');
     end
     Pt_Po_Arbres = (1 + gm1o2*Marbres.^2).^(-gogm1);
     
-    for i = 1:1:length(ANOZ)
+    for i = 1:1:length(ANOZ)                                                % For each point in the nozzle
         Aarb_Astar(i,1) = ANOZ(i)*(1/Ae_At)*Ae_Astar;
-        Marb(i,1)       = A_M_RELATION(Aarb_Astar(i),0,g,'Sub');
+        Marb(i,1)       = ISENTROPIC_FLOW(Aarb_Astar(i),'Asub',g,'M');
     end
     Pt_Po_Arb = (1 + gm1o2*Marb.^2).^(-gogm1);
     
     assignin('base','Aarb_Astar',Aarb_Astar);
     assignin('base','Marb',Marb);
     assignin('base','Pt_Po_Arb',Pt_Po_Arb);
-    
     assignin('base','Me',Me);
     assignin('base','Ae_Astar',Ae_Astar);
     assignin('base','At_Astar',At_Astar);
     assignin('base','Mt',Mt);
     assignin('base','Pt_Po',Pt_Po);
 end
-% -----------------------------------------------------
+% -------------------------------------------------------------------------
 
-% ----------------- NORMAL SHOCK IN NOZZLE-------------
+% ------------------------ NORMAL SHOCK IN NOZZLE -------------------------
 if (strcmpi(CDState,'NS_NOZZLE'))
-    pctNS        = (A1_Astar-1)/(Ae_At-1);
+    pctNS        = (A1_Astar-1)/(Ae_At-1);                                  % Percentage location of normal shock
     midMPPts     = pctNS*maxX;
     numPreShock  = floor(pctNS*numMPPts);
     if (numPreShock == 0)
@@ -530,7 +531,7 @@ if (strcmpi(CDState,'NS_NOZZLE'))
         if (ANOZ_PRE(i) == 1)
             MPLOT_PRE(i) = 1;
         else
-            MPLOT_PRE(i) = A_M_RELATION(ANOZ_PRE(i),0,g,'Sup');
+            MPLOT_PRE(i) = ISENTROPIC_FLOW(ANOZ_PRE(i),'Asup',g,'M');
         end
         
         % Solve for pressure ratio pre-shock
@@ -543,14 +544,14 @@ if (strcmpi(CDState,'NS_NOZZLE'))
         if (ANOZ_POST(i) == 1)
             MPLOT_POST(i) = 1;
         else
-            MPLOT_POST(i) = A_M_RELATION(ANOZ_POST(i),0,g,'Sub');
+            MPLOT_POST(i) = ISENTROPIC_FLOW(ANOZ_POST(i),'Asub',g,'M');
         end
         
         % Solve for pressure ratio pre-shock
         PPLOT_POST(i) = (1 + gm1o2*MPLOT_POST(i)^2)^(-gogm1);
     end
 end
-% -----------------------------------------------------
+% -------------------------------------------------------------------------
 
 % Solve for critical expansion ratio (gamma dependent)
 Pcrit = (gp1o2)^(-gogm1);
@@ -562,15 +563,15 @@ plot([XPLOT(1) XPLOT(end)],[Pcrit Pcrit],'k--','LineWidth',2);              % Pl
 plot(XPLOT(iNozS:iNozE),PPLOTSub,'k--','LineWidth',2);                      % Isentropic subsonic
 plot(XPLOT(iNozS:iNozE),PPLOTSup,'k--','LineWidth',2);                      % Isentropic supersonic
 plot(XPLOT(iResS:iResE),PPLOTRes,'k--','LineWidth',2);                      % Reservoir
-if (strcmpi(CDState,'OE') || strcmpi(CDState,'UE'))
+if (strcmpi(CDState,'OE') || strcmpi(CDState,'UE'))                         % OVEREXPANDED (OBLIQUE)
     plot(XPLOT(iResS:iResE),PPLOTRes,'r-','LineWidth',2);
     plot(XPLOT(iNozS:iNozE),PPLOTSup,'r-','LineWidth',2);
     plot(XPLOT(iNozE),Pe_Po,'ro','MarkerFaceColor','r',...
                                  'MarkerEdgeColor','k');
-elseif (strcmpi(CDState,'ISEN_SUB'))
+elseif (strcmpi(CDState,'ISEN_SUB'))                                        % ISENTROPIC SUBSONIC
     plot(XPLOT(iNozS:iNozE),Pt_Po_Arb,'r-','LineWidth',2);
     plot(XPLOT(iResS:iResE),Pt_Po_Arbres,'r-','LineWidth',2);
-elseif (strcmpi(CDState,'NS_NOZZLE'))
+elseif (strcmpi(CDState,'NS_NOZZLE'))                                       % NORMAL SHOCK IN NOZZLE
     assignin('base','XNOZ_PRE',XNOZ_PRE);
     assignin('base','PPLOT_PRE',PPLOT_PRE);
     plot(XPLOT(iResS:iResE),PPLOTRes,'r-','LineWidth',2);
@@ -612,54 +613,233 @@ xlabel('Position');
 ylabel('M');
 set(handles.plotM,'XTickLabel',[]);
 
-% ===================================================
-% ============= END PLOTTING P AND M ================
-% ===================================================
+% =========================================================================
+% ========================= END PLOTTING P AND M ==========================
+% =========================================================================
 
 % Indicate status that we are done
 set(handles.textStatus,'String','Done!',...
                        'ForegroundColor','k');
 drawnow();
 
-% FUNCTION ----------- Area-Mach Number Relation --------------------------
-function [sol] = A_M_RELATION(ARatio,M,g,SubSup)
+% FUNCTION ---------- ISENTROPIC FLOW RELATIONS ---------------------------
+function [sol] = ISENTROPIC_FLOW(inVal,inVar,g,outVar)
 % =========================================================================
-% - Solve for either the area ratio or Mach number
-%   - Depends on what the user inputs are
+% - Solve isentropic flow relations
 % =========================================================================
 
-% Set initial value of solution so it doesn't error out
-sol = inf;
-
-% Get and set convenient variables
-gp1   = g + 1;
-gm1   = g - 1;
-gm1o2 = gm1/2;
-
-% Solve for area ratio or Mach number
-if (ARatio == 0)                                                            % SOLVE: AREA RATIO
-    sol = sqrt((1/(M^2))*(((2/gp1)*(1+gm1o2*M^2)).^(gp1/gm1)));             % Solve
-elseif (M == 0)                                                             % SOLVE: MACH NUMBER
-    if (strcmpi(SubSup,'Sub'))                                              % Subsonic value
-        problem.objective = @(M) sqrt((1/(M^2))*(((2/gp1)*...
-                                    (1+gm1o2*M^2))^(gp1/gm1))) - ARatio;    % Objective function
-        problem.x0        = [1e-6 1];                                       % Solver bounds
-        problem.solver    = 'fzero';                                        % Find the zero
-        problem.options   = optimset(@fzero);                               % Default options
-        sol               = fzero(problem);                                 % Solve
-    elseif (strcmpi(SubSup,'Sup'))                                          % Supersonic value
-        problem.objective = @(M) sqrt((1/(M^2))*(((2/gp1)*...
-                                    (1+gm1o2*M^2))^(gp1/gm1))) - ARatio;    % Objective function
-        problem.x0        = [1 50];                                         % Solver Bounds
-        problem.solver    = 'fzero';                                        % Find the zero
-        problem.options   = optimset(@fzero);                               % Default options
-        sol               = fzero(problem);                                 % Solve
+    % Check input argument number
+    if (nargin == 3)
+        outVar = 0;
     end
-end
 
-if (sol == inf)
-    fprintf('Error in A_M_RELATION function\n\n');
-end
+    % Catch errors associated with input variable
+    inVarArray = {'M';'TT0';'PP0';'rr0';'Asub';'Asup';'mu';'nu'};
+    if (~ismember(inVar,inVarArray))
+        sol = inf;
+        fprintf('Input variable name is incorrect!\n');
+        return;
+    end
+
+    % User input variables
+    v = inVal;
+    if (strcmpi(inVar,'M'))
+        i = 1;
+    elseif (strcmpi(inVar,'TT0'))
+        i = 2;
+    elseif (strcmpi(inVar,'PP0'))
+        i = 3;
+    elseif (strcmpi(inVar,'rr0'))
+        i = 4;
+    elseif (strcmpi(inVar,'Asub'))
+        i = 5;
+    elseif (strcmpi(inVar,'Asup'))
+        i = 6;
+    elseif (strcmpi(inVar,'mu'))
+        i = 7;
+    elseif (strcmpi(inVar,'nu'))
+        i = 8;
+    end
+
+    % Convenient parameters
+    gm1   = g-1;
+    gm1og = gm1/g;
+
+    % Check that specific heat ratio is greater than unity
+    if (g <= 1)
+        fprintf('Gamma must be greater than 1\n');
+        return;
+    end
+
+    % Solve using: Mach Number
+    if (i == 1)
+        if (v <= 0)
+            sol = inf;
+            fprintf('M must be greater than 0\n');
+            return;
+        else
+            M = v;
+        end
+    end
+
+    % Solve using: T/T0
+    if (i == 2)
+        if (v >= 1 || v <= 0)
+            sol = inf;
+            fprintf('T/T0 must be between 0 and 1\n');
+            return;
+        else
+            M = sqrt(2*((1/v)-1)/(g-1));
+        end
+    end
+
+    % Solve using: P/P0
+    if (i == 3)
+        if (v >= 1 || v <= 0)
+            sol = inf;
+            fprintf('P/P0 must be between 0 and 1\n');
+            return;
+        else
+            M = sqrt(2*((1/(v^gm1og))-1)/gm1);
+        end
+    end
+
+    % Solve using: rho/rho0
+    if (i == 4)
+        if (v >= 1 || v <= 0)
+            sol = inf;
+            fprintf('rho/rho0 must be between 0 and 1\n');
+            return;
+        else
+            M = sqrt(2*((1/(v^gm1))-1)/gm1);
+        end
+    end
+
+    % Solve using: A/A* (sub and sup)
+    if (i == 5 || i == 6)
+        if (v <= 1)
+            sol = inf;
+            fprintf('A/A* must be greater than 1\n');
+            return;
+        else
+            Mnew = 0.00001;
+            M    = 0;
+            if (i == 6)
+                Mnew = 2;
+            end
+
+            while (abs(Mnew-M) > 0.000001)
+                M    = Mnew;
+                phi  = AAS(g,M);
+                s    = (3-g)/(g+1);
+                Mnew = M-(phi-v)/((phi*M)^s-phi/M);
+            end
+        end
+    end
+
+    % Solve using: Mach Angle (deg)
+    if (i == 7)
+        if (v <= 0 || v >= 90)
+            sol = inf;
+            fprintf('Mach angle must be between 0 and 90 degrees\n');
+            return;
+        else
+            M = 1/(sind(v));
+        end
+    end
+
+    % Solve using: P-M Angle (deg)
+    if (i == 8)
+        numax = (sqrt((g+1)/(g-1))-1)*90;
+        if (v <= 0 || v >= numax)
+            sol = inf;
+            fprintf('P-M angle must be between 0 and %3.2f degrees\n',numax);
+            return;
+        else
+            Mnew = 2;
+            M    = 0;
+            while(abs(Mnew-M) > 0.00001)
+                M    = Mnew;
+                fm   = (NU(g,M)-v)*(pi/180);
+                fdm  = sqrt((M^2)-1)/(1+0.5*(g-1)*(M^2))/M;
+                Mnew = M - (fm/fdm);
+            end
+        end
+    end
+
+    % Solve for Mach wave angle and PM angle
+    if (M > 1)
+        mu = asind(1/M);
+        nu = NU(g,M);
+    elseif (M == 1)
+        mu = 90;
+        nu = 0;
+    else
+        mu = inf;
+        nu = inf;
+    end
+
+    % Set solution variables
+    if (outVar == 0)
+        sol.mu  = mu;
+        sol.nu  = nu;
+        sol.M   = M;
+        sol.TT0 = TT0(g,M);
+        sol.PP0 = PP0(g,M);
+        sol.rr0 = RR0(g,M);
+        sol.TTs = TTS(g,M);
+        sol.PPs = PPS(g,M);
+        sol.rrs = RRS(g,M);
+        sol.AAs = AAS(g,M);
+    elseif (strcmpi(outVar,'mu'))
+        sol = mu;
+    elseif (strcmpi(outVar,'nu'))
+        sol = nu;
+    elseif (strcmpi(outVar,'M'))
+        sol = M;
+    elseif (strcmpi(outVar,'TT0'))
+        sol = TT0(g,M);
+    elseif (strcmpi(outVar,'PP0'))
+        sol = PP0(g,M);
+    elseif (strcmpi(outVar,'rr0'))
+        sol = RR0(g,M);
+    elseif (strcmpi(outVar,'TTS'))
+        sol = TTS(g,M);
+    elseif (strcmpi(outVar,'PPS'))
+        sol = PPS(g,M);
+    elseif (strcmpi(outVar,'rrs'))
+        sol = RRS(g,M);
+    elseif (strcmpi(outVar,'AAs'))
+        sol = AAS(g,M);
+    end
+
+function [nu_Out] = NU(g,M)
+    term1  = sqrt((g+1)/(g-1));
+    term2  = atand(sqrt(((g-1)/(g+1))*((M^2)-1)));
+    term3  = atand(sqrt((M^2)-1));
+    nu_Out = term1*term2 - term3;
+    
+function [pp0_Out] = PP0(g,M)
+    pp0_Out = (1+(g-1)/2*(M^2))^(-g/(g-1));
+
+function [rr0_Out] = RR0(g,M)
+    rr0_Out = (1+(g-1)/2*(M^2))^(-1/(g-1));
+
+function [tt0_Out] = TT0(g,M)
+    tt0_Out = (1+(g-1)/2*(M^2))^(-1);
+
+function [pps_Out] = PPS(g,M)
+    pps_Out = PP0(g,M)*((g+1)/2)^(g/(g-1));
+
+function [rrs_Out] = RRS(g,M)
+    rrs_Out = RR0(g,M)*((g+1)/2)^(1/(g-1));
+
+function [tts_Out] = TTS(g,M)
+    tts_Out = TT0(g,M)*((g+1)/2);
+
+function [aas_Out] = AAS(g,M)
+    aas_Out = (1/RRS(g,M))*sqrt(1/TTS(g,M))/M;
+
 
 % PUSH -------------------- Exit the GUI ----------------------------------
 function pushExit_Callback(hObject, eventdata, handles)
